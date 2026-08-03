@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Envs
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Outputs
+output/
+logs/
+*.parquet
+*.csv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
