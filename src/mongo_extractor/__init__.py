@@ -4,7 +4,7 @@ via SSH tunnel o AWS SSM port-forward, segun perfil.
 
 API publica:
 - list_profiles() -> List[str]
-- extract_aggregate(profile, collection, pipeline) -> pandas.DataFrame
+- extract_aggregate(profile, collection, pipeline (lista o texto JSON) | pipeline_file) -> pandas.DataFrame
 - run_pipeline_from_file(pipeline_file, ...) -> pandas.DataFrame
 """
 from mongo_extractor.extractor import extract_aggregate, list_profiles

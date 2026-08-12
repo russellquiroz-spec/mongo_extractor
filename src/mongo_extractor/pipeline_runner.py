@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
 from mongo_extractor.extractor import OnEvent, extract_aggregate
+from mongo_extractor.io import read_pipeline_file, resolve_pipeline_path  # noqa: F401  (re-export)
 
 Pipeline = List[Dict[str, Any]]
 
@@ -27,39 +27,6 @@ CONNECTION_ERROR_HINTS = (
     "operationalerror",
     "serverselectiontimeouterror",
 )
-
-
-def read_pipeline_file(pipeline_file: Path) -> Tuple[Pipeline, Optional[str]]:
-    """Lee un archivo .json y devuelve (pipeline, collection).
-
-    Formatos aceptados:
-      - Array: [{"$match": ...}, ...]
-      - Objeto con metadata: {"collection": "x", "pipeline": [...]}
-      - Objeto suelto (una etapa): {"$project": ...}
-    """
-    if not pipeline_file.exists():
-        raise FileNotFoundError(f"No existe el archivo: {pipeline_file}")
-    if not pipeline_file.is_file():
-        raise ValueError(f"No es un archivo: {pipeline_file}")
-
-    text = pipeline_file.read_text(encoding="utf-8")
-    data = json.loads(text)
-
-    collection: Optional[str] = None
-
-    if isinstance(data, dict):
-        if "pipeline" in data:
-            collection = data.get("collection")
-            data = data["pipeline"]
-        else:
-            data = [data]
-
-    if not isinstance(data, list):
-        raise ValueError(
-            "El archivo debe contener un JSON array, un objeto con 'collection'+'pipeline', "
-            "o un objeto con una etapa."
-        )
-    return data, collection
 
 
 def apply_limit(pipeline: Pipeline, limit: Optional[int]) -> Pipeline:

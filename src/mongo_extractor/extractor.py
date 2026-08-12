@@ -4,13 +4,14 @@ import os
 import time
 from datetime import datetime as dt
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 from urllib.parse import quote_plus
 
 import pandas as pd
 from pymongo import MongoClient
 
 from mongo_extractor.config import load_config
+from mongo_extractor.io import parse_pipeline_json, read_pipeline_file, resolve_pipeline_path
 from mongo_extractor.tunnel import open_tunnel
 from mongo_extractor.types import MongoConfig
 
@@ -19,6 +20,7 @@ Pipeline = List[Dict[str, Any]]
 Level = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 EventType = Literal[
     "CONFIG_LOADED",
+    "PIPELINE_LOADED",
     "ALIAS_RESOLVED",
     "TUNNEL_START",
     "TUNNEL_READY",
@@ -84,9 +86,10 @@ def list_profiles(*, on_event: Optional[OnEvent] = None) -> List[str]:
 
 def extract_aggregate(
     profile: str,
-    collection: str,
-    pipeline: Pipeline,
+    collection: Optional[str] = None,
+    pipeline: Optional[Union[Pipeline, str]] = None,
     *,
+    pipeline_file: Optional[Union[str, Path]] = None,
     on_event: Optional[OnEvent] = None,
     save_dir: Optional[str] = None,
     base_name: Optional[str] = None,
@@ -100,6 +103,13 @@ def extract_aggregate(
     """
     Ejecuta una agregacion Mongo en `profile`.collection y devuelve un DataFrame.
 
+    El pipeline se pasa de una de dos formas (mutuamente excluyentes):
+      - pipeline: lista de etapas en memoria, o el mismo JSON como texto
+      - pipeline_file: ruta a un .json (absoluta o relativa al cwd)
+
+    En texto y en archivo, si el JSON trae el campo 'collection' se usa cuando no
+    se pasa `collection`.
+
     Persistencia opcional:
       - save_dir: carpeta destino (si None, no guarda nada)
       - base_name: nombre base (sin extension). Si None, genera uno.
@@ -110,8 +120,62 @@ def extract_aggregate(
     profile_in = profile
     profile = profile.lower()
 
+    if pipeline is not None and pipeline_file is not None:
+        _emit(
+            on_event,
+            level="ERROR",
+            event="ERROR",
+            message="Both pipeline and pipeline_file received.",
+            profile=profile,
+        )
+        raise ValueError("Pasa pipeline o pipeline_file, no ambos")
+
+    from_json = pipeline_file is not None or isinstance(pipeline, str)
+
+    if pipeline_file is not None:
+        resolved_file = resolve_pipeline_path(pipeline_file)
+        pipeline, file_collection = read_pipeline_file(resolved_file)
+        collection = collection or file_collection
+        _emit(
+            on_event,
+            level="INFO",
+            event="PIPELINE_LOADED",
+            message="Pipeline loaded from file.",
+            profile=profile,
+            source="file",
+            path=str(resolved_file),
+            stages=len(pipeline),
+            collection=collection,
+        )
+    elif isinstance(pipeline, str):
+        pipeline, text_collection = parse_pipeline_json(pipeline)
+        collection = collection or text_collection
+        _emit(
+            on_event,
+            level="INFO",
+            event="PIPELINE_LOADED",
+            message="Pipeline parsed from text.",
+            profile=profile,
+            source="text",
+            stages=len(pipeline),
+            collection=collection,
+        )
+    elif pipeline is None:
+        _emit(
+            on_event,
+            level="ERROR",
+            event="ERROR",
+            message="Missing pipeline.",
+            profile=profile,
+        )
+        raise ValueError("Debes pasar pipeline o pipeline_file")
+
     if not isinstance(collection, str) or not collection.strip():
         _emit(on_event, level="ERROR", event="ERROR", message="Empty collection.", profile=profile)
+        if from_json:
+            raise ValueError(
+                "No se especifico coleccion. Agrega 'collection' en el JSON o pasa collection=..."
+            )
         raise ValueError("collection debe ser un string no vacio")
 
     if not isinstance(pipeline, list) or not all(isinstance(x, dict) for x in pipeline):

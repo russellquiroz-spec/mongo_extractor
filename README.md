@@ -12,6 +12,8 @@ QUE HACE
 - Abre el tunel correcto segun el perfil (`TUNNEL=ssh|ssm`).
 - Conecta a Mongo/DocDB via `pymongo`.
 - Ejecuta un pipeline de agregacion sobre la coleccion indicada y devuelve un `pandas.DataFrame`.
+- Acepta el pipeline como lista de etapas, como texto JSON o como archivo `.json`
+  (ruta absoluta o relativa).
 - Opcionalmente guarda CSV y/o Parquet sin dejar de devolver el DataFrame.
 - Ejecuta pipelines guardados como archivo `.json`, con `$limit` automatico para pruebas
   rapidas y reintentos ante fallas de conexion/tunel.
@@ -183,11 +185,96 @@ df = extract_aggregate(
 ```
 
 Si `save_dir` es `None` no se guarda nada. Si `base_name` es `None` se genera
-`<profile>_<db>_<collection>_<YYYYmmdd_HHMMSS>`. Otros parametros opcionales:
-`csv_index` (default `False`), `csv_encoding` (default `utf-8`),
-`parquet_index` (default `False`) y `allow_disk_use` (default `True`).
+`<profile>_<db>_<collection>_<YYYYmmdd_HHMMSS>`.
 
-### Pipeline desde un archivo .json
+Parametros de `extract_aggregate`:
+
+| Parametro        | Default    | Descripcion                                                            |
+| ---------------- | ---------- | ---------------------------------------------------------------------- |
+| `profile`        | (requerido)| Alias del perfil; se normaliza a lowercase.                            |
+| `collection`     | `None`     | Coleccion. Opcional si el JSON trae `collection`.                      |
+| `pipeline`       | `None`     | Lista de etapas o el mismo JSON como texto.                            |
+| `pipeline_file`  | `None`     | Ruta a un `.json` (absoluta o relativa). Excluyente con `pipeline`.    |
+| `on_event`       | `None`     | Callback de eventos de estado.                                        |
+| `save_dir`       | `None`     | Carpeta destino; si es `None` no guarda nada.                          |
+| `base_name`      | `None`     | Nombre base sin extension; si es `None` se autogenera.                 |
+| `save_csv`       | `False`    | Guarda CSV en `save_dir`.                                              |
+| `save_parquet`   | `False`    | Guarda Parquet en `save_dir`.                                          |
+| `csv_index`      | `False`    | Escribe el indice en el CSV.                                           |
+| `csv_encoding`   | `utf-8`    | Encoding del CSV.                                                      |
+| `parquet_index`  | `False`    | Escribe el indice en el Parquet.                                       |
+| `allow_disk_use` | `True`     | `allowDiskUse` del `aggregate`.                                        |
+
+### extract_aggregate: pipeline como lista, texto o archivo
+
+`pipeline` acepta la lista de etapas o el mismo JSON en texto:
+
+```python
+df = extract_aggregate(
+    profile="bnpl",
+    collection="users",
+    pipeline='[{"$match": {"status": "active"}}, {"$limit": 100}]',
+)
+```
+
+En vez de `pipeline`, se puede pasar `pipeline_file` con la ruta de un `.json`.
+Acepta rutas absolutas y relativas (las relativas se resuelven contra el directorio
+de trabajo actual) y expande `~`:
+
+```python
+from mongo_extractor import extract_aggregate
+
+# Relativa al cwd
+df = extract_aggregate(
+    profile="bnpl",
+    collection="users",
+    pipeline_file="queries/mongo/usuarios_activos.json",
+)
+
+# Absoluta
+df = extract_aggregate(
+    profile="bnpl",
+    collection="users",
+    pipeline_file=r"C:\Users\TuUsuario\Documents\queries\usuarios_activos.json",
+)
+```
+
+Texto y archivo aceptan los mismos tres formatos: array de etapas, objeto
+`{"collection": ..., "pipeline": [...]}`, u objeto de una sola etapa. Si el JSON trae
+el campo `collection`, se puede omitir el argumento `collection` (el argumento tiene
+prioridad):
+
+```json
+{
+  "collection": "users",
+  "pipeline": [{"$match": {"status": "active"}}, {"$limit": 100}]
+}
+```
+
+```python
+df = extract_aggregate(profile="bnpl", pipeline_file="queries/usuarios_activos.json")
+# o el mismo contenido como texto:
+df = extract_aggregate(
+    profile="bnpl",
+    pipeline='{"collection": "users", "pipeline": [{"$limit": 100}]}',
+)
+```
+
+Reglas y errores:
+
+- `pipeline` y `pipeline_file` son mutuamente excluyentes: pasar ambos lanza
+  `ValueError("Pasa pipeline o pipeline_file, no ambos")`.
+- Hay que pasar uno de los dos: si faltan ambos lanza
+  `ValueError("Debes pasar pipeline o pipeline_file")`.
+- Sin coleccion (ni argumento ni campo en el JSON) lanza `ValueError`.
+- Ruta inexistente lanza `FileNotFoundError` con la ruta ya resuelta a absoluta.
+- JSON mal formado lanza `json.JSONDecodeError`.
+
+A diferencia de `run_pipeline_from_file`, esta ruta **no** agrega `$limit` ni reintenta
+ante fallos de conexion: ejecuta el pipeline tal cual, con los mismos parametros de
+guardado (`save_dir`, `save_csv`, etc.).
+
+### run_pipeline_from_file: archivo con $limit y reintentos
 
 `run_pipeline_from_file` lee el pipeline de un `.json`, aplica `$limit` (salvo `full=True`)
 y ejecuta con reintentos ante errores de conexion/tunel:
@@ -250,9 +337,20 @@ print(list_profiles(on_event=printer))
 df = extract_aggregate("tx", "transactions", [{"$limit": 5}], on_event=printer)
 ```
 
-Eventos: `CONFIG_LOADED`, `ALIAS_RESOLVED`, `TUNNEL_START`, `TUNNEL_READY`,
+Eventos: `CONFIG_LOADED`, `PIPELINE_LOADED`, `ALIAS_RESOLVED`, `TUNNEL_START`, `TUNNEL_READY`,
 `DB_CONNECT_START`, `DB_CONNECTED`, `QUERY_START`, `QUERY_OK`,
 `CONNECTION_CLOSED`, `DONE`, `ERROR`.
+
+`PIPELINE_LOADED` solo se emite cuando el pipeline vino como texto JSON o como archivo,
+e incluye `source` (`"text"` o `"file"`), `stages`, `collection` resuelta y —solo para
+archivo— `path` con la ruta absoluta ya resuelta. Util para confirmar que una ruta
+relativa apunto al archivo correcto:
+
+```text
+2026-08-11T10:22:03 [INFO] PIPELINE_LOADED: Pipeline loaded from file. | {'profile': 'bnpl',
+'source': 'file', 'path': 'C:\\...\\queries\\mongo\\usuarios_activos.json', 'stages': 2,
+'collection': 'users'}
+```
 
 --------------------------------------------------------------------------------
 CLI
@@ -265,7 +363,11 @@ mongo-extractor ls
 mongo-extractor run --profile tx --collection transactions --pipeline "[{\"$limit\": 5}]" --out .\output\result.parquet --fmt parquet
 ```
 
-`--pipeline` recibe un JSON como string. Formatos de salida: `csv` y `parquet`.
+`--pipeline` recibe un JSON como string, con los mismos formatos que un `.json`
+(array, objeto `{"collection": ..., "pipeline": [...]}`, u objeto de una etapa); en `run`
+la coleccion siempre sale de `--collection`. Formatos de salida: `csv` y `parquet`.
+
+Para correr un pipeline guardado en archivo usa `run-file` (abajo).
 
 ### run-file: pipelines desde un archivo .json
 
@@ -293,7 +395,7 @@ Opciones:
 | `--print-pipeline` | `False`              | Imprime el pipeline final (con `$limit` ya aplicado).              |
 | `--dry-run`        | `False`              | Solo arma/imprime el pipeline final; no conecta ni ejecuta.        |
 
-El archivo `.json` acepta los mismos formatos que `extract_aggregate` (ver `pipeline_runner.py`):
+El archivo `.json` acepta los mismos formatos que `extract_aggregate` (ver `io.py`):
 array directo, objeto `{"collection": ..., "pipeline": [...]}`, u objeto de una sola etapa.
 `--collection` tiene prioridad sobre el campo `collection` del archivo.
 
@@ -311,12 +413,14 @@ ESTRUCTURA DEL PROYECTO
 - `tunnels/ssh.py`: backend SSH (sshtunnel/paramiko).
 - `tunnels/ssm.py`: backend AWS SSM port-forward (boto3 + subprocess).
 - `tunnel.py`: dispatcher unificado segun `TUNNEL` del perfil.
-- `extractor.py`: `list_profiles`, `extract_aggregate`.
+- `extractor.py`: `list_profiles`, `extract_aggregate` (acepta `pipeline` como lista o texto JSON, o `pipeline_file`).
 - `pipeline_runner.py`: ejecuta pipelines leidos de un archivo `.json`, con `$limit` automatico y
   reintentos ante errores de conexion/tunel (usado por `cli.py run-file` y por runners externos).
-  Piezas reutilizables: `read_pipeline_file`, `apply_limit`, `run_pipeline_with_retries`,
-  `run_pipeline_from_file`, `is_connection_error`, `default_event_printer`, `print_result`.
-- `io.py`: utilidades de escritura.
+  Piezas reutilizables: `apply_limit`, `run_pipeline_with_retries`, `run_pipeline_from_file`,
+  `is_connection_error`, `default_event_printer`, `print_result` (mas `read_pipeline_file`
+  reexportado desde `io.py`).
+- `io.py`: lectura/parseo de pipelines JSON (`parse_pipeline_json`, `read_pipeline_file`,
+  `resolve_pipeline_path`) y utilidades de escritura.
 - `cli.py`: entrypoint de CLI (`ls`, `run`, `run-file`).
 
 API publica reexportada en `mongo_extractor/__init__.py`: `list_profiles`,

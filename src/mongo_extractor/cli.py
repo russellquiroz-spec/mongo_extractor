@@ -48,8 +48,7 @@ def run(
     Ejecuta un aggregate y guarda el resultado a archivo.
     """
     configure_logging()
-    pipeline_parsed = json.loads(pipeline)
-    df = extract_aggregate(profile=profile, collection=collection, pipeline=pipeline_parsed)
+    df = extract_aggregate(profile=profile, collection=collection, pipeline=pipeline)
     out_path = save_dataframe(df, out, fmt=fmt)  # type: ignore[arg-type]
     typer.echo(f"OK -> {out_path}")
 
