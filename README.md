@@ -327,7 +327,16 @@ TROUBLESHOOTING
 --------------------------------------------------------------------------------
 
 - SSH auth falla: revisa `SSH_USER`, `SSH_KEY_PATH` y permisos del `.pem`.
-- SSM no levanta: `aws sso login` reciente, IAM con permisos para `ssm:StartSession`, y revisa `SSM_TARGET` (instance-id).
+- SSM no levanta: `aws sso login` reciente, IAM con permisos para `ssm:StartSession`, y revisa `SSM_TARGET` (instance-id). El error ahora trae la salida del forwarder, que suele decir la causa exacta.
+- **`El puerto local N ya esta ocupado`** (ruta SSM): hay un forwarder huerfano de una corrida anterior con el puerto tomado. `LOCAL_PORT` es fijo, asi que el tunel nuevo no podria hacer bind y el cliente acabaria hablando con el tunel viejo —posiblemente contra otro cluster— sin ningun error. Por eso se falla en vez de continuar. Liberalo:
+
+  ```powershell
+  Get-NetTCPConnection -LocalPort <N> -State Listen | Select-Object OwningProcess
+  Get-Process aws, session-manager-plugin | Stop-Process -Force
+  ```
+
+  Los huerfanos ya no deberian aparecer: al salir del contexto se mata el arbol completo de procesos. Si vuelven, es porque el proceso murio de una forma que no dejo correr el cierre (un `kill -9`, cerrar la terminal a la fuerza).
+- **Destino efectivo de un perfil SSM:** el forwarding lo hace el subprocess de `SSM_COMMAND`, asi que el host y puerto que valen son los que van **dentro de ese comando**. `REMOTE_HOST` y `REMOTE_PORT` solo alimentan la sesion de `boto3.start_session`, que no reenvia nada por si sola. Si los dos no coinciden, manda `SSM_COMMAND`.
 - Mongo ping timeout: el WARMUP_S puede ser insuficiente; sube `MONGO__<alias>__WARMUP_S`.
 - Password con caracteres especiales: el extractor aplica URL-encoding al sustituir en el URI; no escapes manualmente en el secreto.
 - Alias no existe: revisa con `list_profiles()` y confirma el bloque en `.env.mongo_extractor`.
