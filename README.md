@@ -194,7 +194,7 @@ Parametros de `extract_aggregate`:
 | `profile`        | (requerido)| Alias del perfil; se normaliza a lowercase.                            |
 | `collection`     | `None`     | Coleccion. Opcional si el JSON trae `collection`.                      |
 | `pipeline`       | `None`     | Lista de etapas o el mismo JSON como texto.                            |
-| `pipeline_file`  | `None`     | Ruta a un `.json` (absoluta o relativa). Excluyente con `pipeline`.    |
+| `pipeline_file`  | `None`     | Ruta a un `.json` (absoluta o relativa). Se ignora si se pasa `pipeline`. |
 | `on_event`       | `None`     | Callback de eventos de estado.                                        |
 | `save_dir`       | `None`     | Carpeta destino; si es `None` no guarda nada.                          |
 | `base_name`      | `None`     | Nombre base sin extension; si es `None` se autogenera.                 |
@@ -262,8 +262,9 @@ df = extract_aggregate(
 
 Reglas y errores:
 
-- `pipeline` y `pipeline_file` son mutuamente excluyentes: pasar ambos lanza
-  `ValueError("Pasa pipeline o pipeline_file, no ambos")`.
+- Si se pasan los dos, `pipeline` gana y `pipeline_file` se ignora: el archivo no se
+  lee ni se valida (una ruta inexistente no lanza nada) y el campo `collection` del
+  JSON solo se toma de la fuente que se uso.
 - Hay que pasar uno de los dos: si faltan ambos lanza
   `ValueError("Debes pasar pipeline o pipeline_file")`.
 - Sin coleccion (ni argumento ni campo en el JSON) lanza `ValueError`.

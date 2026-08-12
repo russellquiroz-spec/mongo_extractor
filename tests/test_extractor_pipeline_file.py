@@ -111,11 +111,45 @@ def test_pipeline_file_without_collection_raises(tmp_path) -> None:
         extract_aggregate("bnpl", pipeline_file=path)
 
 
-def test_pipeline_and_pipeline_file_are_mutually_exclusive(tmp_path) -> None:
-    path = _write_pipeline(tmp_path, "p.json", [{"$limit": 1}])
+def test_pipeline_wins_over_pipeline_file(tmp_path, stop_before_connect) -> None:
+    path = _write_pipeline(
+        tmp_path, "p.json", {"collection": "users_archivo", "pipeline": [{"$limit": 99}]}
+    )
+    events = []
 
-    with pytest.raises(ValueError, match="no ambos"):
-        extract_aggregate("bnpl", "users", [{"$limit": 1}], pipeline_file=path)
+    with pytest.raises(_StopAfterLoad):
+        extract_aggregate(
+            "bnpl",
+            pipeline='{"collection": "users_memoria", "pipeline": [{"$match": {"a": 1}}, {"$limit": 2}]}',
+            pipeline_file=path,
+            on_event=events.append,
+        )
+
+    loaded = _events_of(events, "PIPELINE_LOADED")[0]
+    assert loaded["source"] == "text"
+    assert loaded["collection"] == "users_memoria"
+    assert loaded["stages"] == 2
+
+
+def test_pipeline_file_inexistente_se_ignora_si_hay_pipeline(tmp_path, stop_before_connect) -> None:
+    with pytest.raises(_StopAfterLoad):
+        extract_aggregate(
+            "bnpl", "users", [{"$limit": 1}], pipeline_file=tmp_path / "no_existe.json"
+        )
+
+
+def test_ambos_no_emiten_pipeline_loaded_de_archivo(tmp_path, stop_before_connect) -> None:
+    path = _write_pipeline(
+        tmp_path, "p.json", {"collection": "users_archivo", "pipeline": [{"$limit": 99}]}
+    )
+    events = []
+
+    with pytest.raises(_StopAfterLoad):
+        extract_aggregate(
+            "bnpl", "users", [{"$limit": 1}], pipeline_file=path, on_event=events.append
+        )
+
+    assert not [e for e in _events_of(events, "PIPELINE_LOADED") if e["source"] == "file"]
 
 
 def test_missing_pipeline_and_pipeline_file_raises() -> None:

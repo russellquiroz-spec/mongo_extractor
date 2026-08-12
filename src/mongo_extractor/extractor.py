@@ -103,9 +103,11 @@ def extract_aggregate(
     """
     Ejecuta una agregacion Mongo en `profile`.collection y devuelve un DataFrame.
 
-    El pipeline se pasa de una de dos formas (mutuamente excluyentes):
+    El pipeline se pasa de una de dos formas:
       - pipeline: lista de etapas en memoria, o el mismo JSON como texto
       - pipeline_file: ruta a un .json (absoluta o relativa al cwd)
+
+    Si llegan las dos, `pipeline` gana y `pipeline_file` se ignora (no se lee).
 
     En texto y en archivo, si el JSON trae el campo 'collection' se usa cuando no
     se pasa `collection`.
@@ -120,19 +122,24 @@ def extract_aggregate(
     profile_in = profile
     profile = profile.lower()
 
-    if pipeline is not None and pipeline_file is not None:
+    from_json = isinstance(pipeline, str) or (pipeline is None and pipeline_file is not None)
+
+    if isinstance(pipeline, str):
+        pipeline, text_collection = parse_pipeline_json(pipeline)
+        collection = collection or text_collection
         _emit(
             on_event,
-            level="ERROR",
-            event="ERROR",
-            message="Both pipeline and pipeline_file received.",
+            level="INFO",
+            event="PIPELINE_LOADED",
+            message="Pipeline parsed from text.",
             profile=profile,
+            source="text",
+            stages=len(pipeline),
+            collection=collection,
         )
-        raise ValueError("Pasa pipeline o pipeline_file, no ambos")
-
-    from_json = pipeline_file is not None or isinstance(pipeline, str)
-
-    if pipeline_file is not None:
+    elif pipeline is not None:
+        pass
+    elif pipeline_file is not None:
         resolved_file = resolve_pipeline_path(pipeline_file)
         pipeline, file_collection = read_pipeline_file(resolved_file)
         collection = collection or file_collection
@@ -147,20 +154,7 @@ def extract_aggregate(
             stages=len(pipeline),
             collection=collection,
         )
-    elif isinstance(pipeline, str):
-        pipeline, text_collection = parse_pipeline_json(pipeline)
-        collection = collection or text_collection
-        _emit(
-            on_event,
-            level="INFO",
-            event="PIPELINE_LOADED",
-            message="Pipeline parsed from text.",
-            profile=profile,
-            source="text",
-            stages=len(pipeline),
-            collection=collection,
-        )
-    elif pipeline is None:
+    else:
         _emit(
             on_event,
             level="ERROR",
