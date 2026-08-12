@@ -86,6 +86,55 @@ def test_load_config_reads_credentials_from_system_env_for_both_profiles(tmp_pat
     assert tx.ssh.local_port == 27018
 
 
+def test_ssm_command_ya_no_es_obligatorio(tmp_path, monkeypatch) -> None:
+    """
+    SSM_COMMAND dejo de ser obligatorio: el comando se arma desde el perfil. Un
+    SSM_COMMAND vacio equivale a no tenerlo.
+    """
+    _clear_config_env(monkeypatch)
+    env_file = tmp_path / ".env.mongo_extractor"
+    env_file.write_text(
+        "\n".join(
+            [
+                "MONGO__sincmd__TUNNEL=ssm",
+                "MONGO__sincmd__DB=BNPL",
+                "MONGO__sincmd__URI=mongodb://{user}:{password}@localhost:27017/",
+                "MONGO__sincmd__CREDENTIALS_ENV=RIM_FINTECH_BNPL_KEY",
+                "MONGO__sincmd__AWS_REGION=us-east-2",
+                "MONGO__sincmd__SSM_TARGET=i-0d9002794c9ad3b62",
+                "MONGO__sincmd__LOCAL_PORT=27017",
+                "MONGO__sincmd__REMOTE_HOST=cluster-bnpl.docdb.amazonaws.com",
+                "MONGO__sincmd__REMOTE_PORT=27017",
+                # sin SSM_COMMAND
+                "MONGO__vacio__TUNNEL=ssm",
+                "MONGO__vacio__DB=BNPL",
+                "MONGO__vacio__URI=mongodb://{user}:{password}@localhost:27019/",
+                "MONGO__vacio__CREDENTIALS_ENV=RIM_FINTECH_BNPL_KEY",
+                "MONGO__vacio__AWS_REGION=us-east-2",
+                "MONGO__vacio__SSM_TARGET=i-0d9002794c9ad3b62",
+                "MONGO__vacio__LOCAL_PORT=27019",
+                "MONGO__vacio__REMOTE_HOST=cluster-bnpl.docdb.amazonaws.com",
+                "MONGO__vacio__REMOTE_PORT=27017",
+                "MONGO__vacio__SSM_COMMAND=   ",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MONGO_EXTRACTOR_ENV_FILE", str(env_file))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "NoKeyring"))
+    monkeypatch.setenv("RIM_FINTECH_BNPL_KEY", "u:p")
+
+    _app, profiles = load_config()
+
+    for alias in ("sincmd", "vacio"):
+        ssm = profiles[alias].ssm
+        assert ssm is not None
+        assert ssm.ssm_command is None, f"'{alias}' deberia armar el comando desde el perfil"
+        assert ssm.target == "i-0d9002794c9ad3b62"
+        assert ssm.remote_host == "cluster-bnpl.docdb.amazonaws.com"
+
+
 def test_load_config_rejects_invalid_tunnel_mode(tmp_path, monkeypatch) -> None:
     _clear_config_env(monkeypatch)
     env_file = tmp_path / ".env.mongo_extractor"

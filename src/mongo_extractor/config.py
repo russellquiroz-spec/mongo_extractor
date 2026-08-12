@@ -18,7 +18,9 @@ from mongo_extractor.types import (
 _MONGO_KEY_RE = re.compile(r"^MONGO__(?P<alias>[A-Za-z0-9_-]+)__(?P<field>[A-Z_]+)$")
 _REQUIRED_COMMON_FIELDS = {"TUNNEL", "DB", "URI"}
 _REQUIRED_SSH_FIELDS = {"SSH_HOST", "SSH_USER", "SSH_KEY_PATH", "LOCAL_PORT", "REMOTE_HOST", "REMOTE_PORT"}
-_REQUIRED_SSM_FIELDS = {"AWS_REGION", "SSM_TARGET", "LOCAL_PORT", "REMOTE_HOST", "REMOTE_PORT", "SSM_COMMAND"}
+#: SSM_COMMAND ya no es obligatorio: el comando se arma desde estos campos. Sigue
+#: aceptandose por compatibilidad con los .env existentes (ver _build_ssm_params).
+_REQUIRED_SSM_FIELDS = {"AWS_REGION", "SSM_TARGET", "LOCAL_PORT", "REMOTE_HOST", "REMOTE_PORT"}
 _CREDENTIAL_ENV_FIELD = "CREDENTIALS_ENV"
 
 
@@ -124,13 +126,15 @@ def _build_ssm_params(alias: str, fields: Dict[str, str]) -> SSMTunnelParams:
         raise ValueError(
             f"Config Mongo SSM incompleta para alias '{alias}'. Faltan: {sorted(missing)}"
         )
+    # Un SSM_COMMAND vacio equivale a no tenerlo: se arma desde el perfil.
+    ssm_command = (fields.get("SSM_COMMAND") or "").strip() or None
     return SSMTunnelParams(
         aws_region=str(fields["AWS_REGION"]),
         target=str(fields["SSM_TARGET"]),
         local_port=int(fields["LOCAL_PORT"]),
         remote_host=str(fields["REMOTE_HOST"]),
         remote_port=int(fields["REMOTE_PORT"]),
-        ssm_command=str(fields["SSM_COMMAND"]),
+        ssm_command=ssm_command,
     )
 
 

@@ -118,8 +118,15 @@ MONGO__bnpl__SSM_TARGET=i-0d9002794c9ad3b62
 MONGO__bnpl__LOCAL_PORT=27017
 MONGO__bnpl__REMOTE_HOST=tf-rabbit-default-docdb-cluster.cluster-xxx.us-east-2.docdb.amazonaws.com
 MONGO__bnpl__REMOTE_PORT=27017
-MONGO__bnpl__SSM_COMMAND=aws ssm start-session --region "us-east-2" --target "i-xxxx" --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host="...",portNumber="27017",localPortNumber="27017"
 ```
+
+El comando `aws ssm start-session` se arma desde estos campos, asi que no hay nada mas
+que definir.
+
+`SSM_COMMAND` esta **deprecado** y ya no es obligatorio. Si un perfil todavia lo trae, se
+ejecuta tal cual y se ignoran `AWS_REGION`, `SSM_TARGET`, `REMOTE_HOST`, `REMOTE_PORT` y
+`LOCAL_PORT` para armar el comando —con un WARNING al abrir el tunel—. Quitalo para que la
+config sea la unica fuente de verdad del destino.
 
 ### Resolucion de credenciales
 
@@ -309,7 +316,7 @@ ESTRUCTURA DEL PROYECTO
 - `secret_loader.py`: resuelve credenciales desde KeyringManager, variables de sistema y registro de Windows.
 - `types.py`: contratos (`MongoConfig`, `SSHTunnelParams`, `SSMTunnelParams`, `AppConfig`).
 - `tunnels/ssh.py`: backend SSH (sshtunnel/paramiko).
-- `tunnels/ssm.py`: backend AWS SSM port-forward (boto3 + subprocess).
+- `tunnels/ssm.py`: backend AWS SSM port-forward (subprocess `aws ssm start-session` armado desde el perfil; boto3 solo para terminar la sesion).
 - `tunnel.py`: dispatcher unificado segun `TUNNEL` del perfil.
 - `extractor.py`: `list_profiles`, `extract_aggregate`.
 - `pipeline_runner.py`: ejecuta pipelines leidos de un archivo `.json`, con `$limit` automatico y
@@ -336,7 +343,14 @@ TROUBLESHOOTING
   ```
 
   Los huerfanos ya no deberian aparecer: al salir del contexto se mata el arbol completo de procesos. Si vuelven, es porque el proceso murio de una forma que no dejo correr el cierre (un `kill -9`, cerrar la terminal a la fuerza).
-- **Destino efectivo de un perfil SSM:** el forwarding lo hace el subprocess de `SSM_COMMAND`, asi que el host y puerto que valen son los que van **dentro de ese comando**. `REMOTE_HOST` y `REMOTE_PORT` solo alimentan la sesion de `boto3.start_session`, que no reenvia nada por si sola. Si los dos no coinciden, manda `SSM_COMMAND`.
+- **Destino efectivo de un perfil SSM:** el comando se arma desde `AWS_REGION`, `SSM_TARGET`, `REMOTE_HOST`, `REMOTE_PORT` y `LOCAL_PORT`, asi que el perfil es la unica fuente de verdad del destino. La excepcion es un perfil que todavia traiga `SSM_COMMAND`: ahi manda lo que va dentro de ese comando y el WARNING al abrir el tunel lo recuerda.
+- **Sesiones de SSM en AWS:** cada tunel abre **una** sesion y la termina explicitamente al salir del contexto. Antes se abrian dos —una por `boto3.start_session`, que no reenviaba nada, y la del subprocess, que si— y solo se cerraba la primera; la que trabajaba sobrevivia a que se matara el proceso local y quedaba `Active` ~20 min hasta que el idle timeout de AWS la barria. Para auditar:
+
+  ```powershell
+  aws ssm describe-sessions --state Active --region us-east-2
+  ```
+
+  Si al terminar una corrida queda alguna `Active`, es que no se pudo parsear el `SessionId` de la salida del forwarder; se avisa con WARNING y el cierre queda a cargo del idle timeout.
 - Mongo ping timeout: el WARMUP_S puede ser insuficiente; sube `MONGO__<alias>__WARMUP_S`.
 - Password con caracteres especiales: el extractor aplica URL-encoding al sustituir en el URI; no escapes manualmente en el secreto.
 - Alias no existe: revisa con `list_profiles()` y confirma el bloque en `.env.mongo_extractor`.

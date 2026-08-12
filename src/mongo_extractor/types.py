@@ -24,7 +24,9 @@ class SSMTunnelParams:
     local_port: int
     remote_host: str
     remote_port: int
-    ssm_command: str
+    #: Deprecado. Si viene, se ejecuta tal cual y el resto de los campos se ignoran
+    #: para armar el comando. Si es None, el comando se arma desde este perfil.
+    ssm_command: Optional[str] = None
 
 
 @dataclass(frozen=True)
