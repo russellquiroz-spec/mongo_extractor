@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 import mongo_extractor.secret_loader as _secret_loader
 from mongo_extractor.types import (
@@ -51,9 +51,25 @@ def _find_env_file() -> Path:
     )
 
 
-def _load_own_env() -> None:
+def _read_own_env() -> Dict[str, str]:
+    """
+    Lee el env propio y devuelve un dict, SIN escribir en os.environ.
+
+    Antes se usaba load_dotenv(), que copia el archivo al entorno del proceso. Eso
+    rompe la convivencia con las otras librerias del ecosistema: si un proyecto host
+    instala dos y ambas definen una variable con el mismo nombre plano (LOG_LEVEL,
+    OUTPUT_DIR, SSH_HOST...), la primera en cargar gana —python-dotenv usa
+    override=False por defecto— y la segunda se queda en silencio con los valores de
+    la otra, sin ningun error.
+
+    El bug solo aparece en el proyecto host que instala dos, nunca en el venv de
+    desarrollo de cada libreria.
+
+    encoding='utf-8-sig' descarta el BOM que PowerShell 5.1 agrega al escribir UTF-8.
+    """
     env_path = _find_env_file()
-    load_dotenv(dotenv_path=env_path, override=False)
+    values = dotenv_values(dotenv_path=env_path, encoding="utf-8-sig")
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def _resolve_mongo_credentials(alias: str, fields: Dict[str, str]) -> Tuple[str, str]:
@@ -74,11 +90,14 @@ def _resolve_mongo_credentials(alias: str, fields: Dict[str, str]) -> Tuple[str,
     return str(user), str(password)
 
 
-def load_app_config() -> AppConfig:
+def load_app_config(values: Optional[Dict[str, str]] = None) -> AppConfig:
+    """Si no se pasan valores, lee el env propio (sin tocar os.environ)."""
+    if values is None:
+        values = _read_own_env()
     return AppConfig(
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
-        output_dir=os.getenv("OUTPUT_DIR", "./output"),
-        server_selection_timeout_ms=int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "20000")),
+        log_level=values.get("LOG_LEVEL", "INFO"),
+        output_dir=values.get("OUTPUT_DIR", "./output"),
+        server_selection_timeout_ms=int(values.get("MONGO_SERVER_SELECTION_TIMEOUT_MS", "20000")),
     )
 
 
@@ -118,13 +137,13 @@ def _build_ssm_params(alias: str, fields: Dict[str, str]) -> SSMTunnelParams:
 def load_config() -> Tuple[AppConfig, Dict[str, MongoConfig]]:
     """
     Carga unicamente configuracion desde .env.mongo_extractor.
-    No carga .env del proyecto host explicitamente.
+    No carga .env del proyecto host y no escribe en os.environ.
     """
-    _load_own_env()
-    app = load_app_config()
+    values = _read_own_env()
+    app = load_app_config(values)
 
     buckets: Dict[str, Dict[str, str]] = {}
-    for key, value in os.environ.items():
+    for key, value in values.items():
         match = _MONGO_KEY_RE.match(key)
         if not match:
             continue
